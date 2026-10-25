@@ -73,7 +73,11 @@ export class Bridge {
     this.tasks.recover();
     this.router.recover();
     this.notices.recover();
-    try{await this.channel.connect();}catch(e){this.backgroundError(e);}
+    try {
+      await this.channel.connect();
+    } catch (e) {
+      this.backgroundError(e);
+    }
     await this.connectCodex();
     this.timers.push(
       setInterval(

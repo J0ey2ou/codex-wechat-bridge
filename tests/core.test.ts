@@ -148,14 +148,14 @@ test("natural status includes all required fields without imaginary ETA", async 
   for (const s of [
     "项目",
     "任务",
-    "状态",
+    "处理中",
     "开始",
     "运行",
     "最近活动",
-    "阶段",
-    "最近事件",
-    "需要操作",
-    "预计剩余：无可靠依据",
+    "当前步骤",
+    "开始阶段",
+    "不需要你操作",
+    "还要多久暂时没有可靠依据",
   ])
     assert.ok(d.text.includes(s), s);
 });
@@ -407,6 +407,73 @@ test("outbox recovery does not replay uncertain sends", async () => {
     "delivery_unverified",
   );
 });
-test('duplicate turn completion cannot skip a pending stage',async()=>{const f=await fixture();const t=f.tasks.create(f.project.id,'三阶段',[1,2,3].map(i=>({title:`阶段${i}`,prompt:`阶段${i}`,requiresApproval:i>1,lowRisk:false})));await f.tasks.pump();const r=f.store.get<Task>('tasks',t.id)!;const event={threadId:r.threadId,turn:{id:r.turnId,status:'completed'}};f.codex.emit('turn/completed',event);await f.tasks.drained();f.codex.emit('turn/completed',event);await f.tasks.drained();assert.equal(f.store.get<Task>('tasks',t.id)?.stageIndex,1);assert.equal(f.store.all<Approval>('approvals').filter(a=>a.status==='pending').length,1);});
-test('restart during approval resolution fails closed instead of leaving a stranded approval',async()=>{const f=await fixture();const t=f.tasks.create(f.project.id,'两阶段',[1,2].map(i=>({title:`阶段${i}`,prompt:`阶段${i}`,requiresApproval:true,lowRisk:false})));await f.tasks.pump();const r=f.store.get<Task>('tasks',t.id)!;f.codex.emit('turn/completed',{threadId:r.threadId,turn:{id:r.turnId,status:'completed'}});await f.tasks.drained();const a=f.store.all<Approval>('approvals')[0]!;a.status='resolving';f.store.put('approvals',a);f.tasks.recover();assert.equal(f.store.get<Task>('tasks',t.id)?.status,'UNKNOWN');assert.equal(f.store.get<Approval>('approvals',a.id)?.status,'expired');});
-test('completing recurring todo cancels every pending reminder delivery',async()=>{const f=await fixture();const [t]=f.todos.add('检查进度','one');f.todos.confirm(t!.id,'无日期');const r=f.todos.remind(t!.id,'明天 10:00',1);f.todos.tick(r.dueAt+1);f.todos.tick(r.dueAt+60001);assert.equal(f.store.all<Delivery>('notification_deliveries').length,2);f.todos.change(t!.id,'done');assert.ok(f.store.all<Delivery>('notification_deliveries').every(d=>d.status==='cancelled'));});
+test("duplicate turn completion cannot skip a pending stage", async () => {
+  const f = await fixture();
+  const t = f.tasks.create(
+    f.project.id,
+    "三阶段",
+    [1, 2, 3].map((i) => ({
+      title: `阶段${i}`,
+      prompt: `阶段${i}`,
+      requiresApproval: i > 1,
+      lowRisk: false,
+    })),
+  );
+  await f.tasks.pump();
+  const r = f.store.get<Task>("tasks", t.id)!;
+  const event = {
+    threadId: r.threadId,
+    turn: { id: r.turnId, status: "completed" },
+  };
+  f.codex.emit("turn/completed", event);
+  await f.tasks.drained();
+  f.codex.emit("turn/completed", event);
+  await f.tasks.drained();
+  assert.equal(f.store.get<Task>("tasks", t.id)?.stageIndex, 1);
+  assert.equal(
+    f.store.all<Approval>("approvals").filter((a) => a.status === "pending")
+      .length,
+    1,
+  );
+});
+test("restart during approval resolution fails closed instead of leaving a stranded approval", async () => {
+  const f = await fixture();
+  const t = f.tasks.create(
+    f.project.id,
+    "两阶段",
+    [1, 2].map((i) => ({
+      title: `阶段${i}`,
+      prompt: `阶段${i}`,
+      requiresApproval: true,
+      lowRisk: false,
+    })),
+  );
+  await f.tasks.pump();
+  const r = f.store.get<Task>("tasks", t.id)!;
+  f.codex.emit("turn/completed", {
+    threadId: r.threadId,
+    turn: { id: r.turnId, status: "completed" },
+  });
+  await f.tasks.drained();
+  const a = f.store.all<Approval>("approvals")[0]!;
+  a.status = "resolving";
+  f.store.put("approvals", a);
+  f.tasks.recover();
+  assert.equal(f.store.get<Task>("tasks", t.id)?.status, "UNKNOWN");
+  assert.equal(f.store.get<Approval>("approvals", a.id)?.status, "expired");
+});
+test("completing recurring todo cancels every pending reminder delivery", async () => {
+  const f = await fixture();
+  const [t] = f.todos.add("检查进度", "one");
+  f.todos.confirm(t!.id, "无日期");
+  const r = f.todos.remind(t!.id, "明天 10:00", 1);
+  f.todos.tick(r.dueAt + 1);
+  f.todos.tick(r.dueAt + 60001);
+  assert.equal(f.store.all<Delivery>("notification_deliveries").length, 2);
+  f.todos.change(t!.id, "done");
+  assert.ok(
+    f.store
+      .all<Delivery>("notification_deliveries")
+      .every((d) => d.status === "cancelled"),
+  );
+});

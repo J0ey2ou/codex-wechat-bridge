@@ -26,8 +26,13 @@ writeFileSync(lock, String(process.pid), { flag: "wx" });
 const bridge = new Bridge(config);
 const server = createApi(bridge);
 let closing = false;
-const stopFile=path.join(config.dataDir,'stop.request');
-const stopWatcher=setInterval(()=>{if(existsSync(stopFile)){unlinkSync(stopFile);void shutdown();}},500);
+const stopFile = path.join(config.dataDir, "stop.request");
+const stopWatcher = setInterval(() => {
+  if (existsSync(stopFile)) {
+    unlinkSync(stopFile);
+    void shutdown();
+  }
+}, 500);
 async function shutdown() {
   if (closing) return;
   closing = true;

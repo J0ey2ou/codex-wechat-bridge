@@ -4,18 +4,56 @@ export interface ParsedDate {
   ambiguity?: string;
   dateText?: string;
 }
-function chineseNumber(s:string):number{if(/^\d+$/.test(s))return Number(s);const digits:Record<string,number>={零:0,一:1,二:2,两:2,三:3,四:4,五:5,六:6,七:7,八:8,九:9};if(s==='十')return 10;if(s.includes('十')){const [a,b]=s.split('十');return (a?digits[a]??NaN:1)*10+(b?digits[b]??NaN:0);}return digits[s]??NaN;}
+function chineseNumber(s: string): number {
+  if (/^\d+$/.test(s)) return Number(s);
+  const digits: Record<string, number> = {
+    零: 0,
+    一: 1,
+    二: 2,
+    两: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9,
+  };
+  if (s === "十") return 10;
+  if (s.includes("十")) {
+    const [a, b] = s.split("十");
+    return (a ? (digits[a] ?? NaN) : 1) * 10 + (b ? (digits[b] ?? NaN) : 0);
+  }
+  return digits[s] ?? NaN;
+}
 export function parseDate(
   text: string,
   timezone: string,
   now = Date.now(),
   weekHint = false,
 ): ParsedDate {
-  text=text.replace(/([零一二三四五六七八九十两]{1,3})点/g,(_,n:string)=>`${chineseNumber(n)}点`).replace(/点([零一二三四五六七八九十两]{1,3})分/g,(_,n:string)=>`点${chineseNumber(n)}分`);
+  text = text
+    .replace(
+      /([零一二三四五六七八九十两]{1,3})点/g,
+      (_, n: string) => `${chineseNumber(n)}点`,
+    )
+    .replace(
+      /点([零一二三四五六七八九十两]{1,3})分/g,
+      (_, n: string) => `点${chineseNumber(n)}分`,
+    );
   const base = DateTime.fromMillis(now, { zone: timezone });
-  const offset=text.match(/([一二三四五六七八九十两\d]+)(分钟|小时)后/);
-  if(offset){const n=chineseNumber(offset[1]!);if(n>0&&n<=10080)return {at:base.plus(offset[2]==='小时'?{hours:n}:{minutes:n}).toMillis()};}
-  if(/半小时后/.test(text))return {at:base.plus({minutes:30}).toMillis()};
+  const offset = text.match(/([一二三四五六七八九十两\d]+)(分钟|小时)后/);
+  if (offset) {
+    const n = chineseNumber(offset[1]!);
+    if (n > 0 && n <= 10080)
+      return {
+        at: base
+          .plus(offset[2] === "小时" ? { hours: n } : { minutes: n })
+          .toMillis(),
+      };
+  }
+  if (/半小时后/.test(text))
+    return { at: base.plus({ minutes: 30 }).toMillis() };
   let day: DateTime | undefined, dateText: string | undefined;
   const absolute = text.match(/(20\d{2})[-/年](\d{1,2})[-/月](\d{1,2})日?/);
   if (absolute) {
@@ -32,11 +70,9 @@ export function parseDate(
   } else {
     const relative = text.match(/今天|今日|今晚|明天|明日|后天/);
     if (relative) {
-      day = base
-        .startOf("day")
-        .plus({
-          days: /明/.test(relative[0]) ? 1 : relative[0] === "后天" ? 2 : 0,
-        });
+      day = base.startOf("day").plus({
+        days: /明/.test(relative[0]) ? 1 : relative[0] === "后天" ? 2 : 0,
+      });
       dateText = relative[0];
     } else {
       const week = text.match(

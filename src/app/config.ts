@@ -17,7 +17,9 @@ export interface Config {
 export function loadConfig(
   file = process.env.BRIDGE_CONFIG || "config.local.json",
 ): Config {
-  const raw = existsSync(file) ? JSON.parse(readFileSync(file, "utf8").replace(/^\uFEFF/, "")) : {};
+  const raw = existsSync(file)
+    ? JSON.parse(readFileSync(file, "utf8").replace(/^\uFEFF/, ""))
+    : {};
   const c: Config = {
     port: 3210,
     timezone: "Asia/Shanghai",

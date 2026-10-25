@@ -251,7 +251,7 @@ export class ILinkAdapter implements WeChatAdapter {
             raw.message_type !== 1 ||
             raw.message_state !== 2 ||
             !raw.from_user_id ||
-            raw.from_user_id!==this.store.setting('boundUser',null) ||
+            raw.from_user_id !== this.store.setting("boundUser", null) ||
             raw.group_id
           )
             continue;

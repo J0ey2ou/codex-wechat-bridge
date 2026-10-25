@@ -5,18 +5,22 @@ import { TaskOrchestrator } from "../tasks/orchestrator.js";
 import { TodoManager } from "../scheduler/todos.js";
 import { NotificationManager } from "../notifications/outbox.js";
 import { safeText } from "../security/policy.js";
-import { ConversationManager, friendlyHelp } from './conversation.js';
+import { ConversationManager, friendlyHelp } from "./conversation.js";
 export const HELP = `Codex WeChat Bridge\n/status [任务ID] /tasks /projects\n/run 项目名 | 任务描述\n/continue [新要求] /stop [任务ID]\n/approve 审批ID /reject 审批ID\n/modify 审批ID 新要求\n/todo /calendar /addtodo 工作消息\n/confirmtodo 待办ID YYYY-MM-DD HH:mm（或 无日期）\n/edittodo 待办ID 新内容\n/done 待办ID /canceltodo 待办ID\n/remind 待办ID YYYY-MM-DD HH:mm [每N分钟]\n/collect 转发工作消息\n普通消息仅整理待办；项目、绑定和危险命令需本机管理。`;
 export class MessageRouter {
   private chain = Promise.resolve();
-  private conversation:ConversationManager;
+  private conversation: ConversationManager;
   constructor(
     private store: Store,
     private tasks: TaskOrchestrator,
     private todos: TodoManager,
     private notices: NotificationManager,
     private config: Config,
-  ) {this.conversation=new ConversationManager(store,tasks,todos,config);}
+  ) {
+    this.conversation = new ConversationManager(store, tasks, todos, config);
+    todos.onCollected = (ts) =>
+      this.conversation.collected(ts, store.setting("boundUser", ""));
+  }
   receive(message: InboundMessage): Promise<void> {
     const next = this.chain.then(() => this.process(message));
     this.chain = next.catch(() => {});
@@ -25,8 +29,12 @@ export class MessageRouter {
   private current(id?: string): Task {
     const ts = this.tasks.tasks();
     if (id) {
-      const project=this.tasks.projects().find(p=>p.id===id||p.name===id);
-      const t = ts.find((t) => t.id === id)??(project?ts.find(t=>t.projectId===project.id):undefined);
+      const project = this.tasks
+        .projects()
+        .find((p) => p.id === id || p.name === id);
+      const t =
+        ts.find((t) => t.id === id) ??
+        (project ? ts.find((t) => t.projectId === project.id) : undefined);
       if (!t) throw new Error("任务 ID 不存在");
       return t;
     }
@@ -68,9 +76,12 @@ export class MessageRouter {
     try {
       const text = m.text.trim();
       const command = text.match(/^\/(\w+)(?:\s+([\s\S]*))?$/);
-      if(!command&&m.kind==='direct'){
-        response=await this.conversation.reply(text,m.userId,m.id);
-        stored.status='processed';this.store.put('messages',stored);this.notices.enqueue(response,`reply:${m.id}`);return;
+      if (!command && m.kind === "direct") {
+        response = await this.conversation.reply(text, m.userId, m.id);
+        stored.status = "processed";
+        this.store.put("messages", stored);
+        this.notices.enqueue(response, `reply:${m.id}`);
+        return;
       }
       let name = command?.[1]?.toLowerCase(),
         args = command?.[2]?.trim() ?? "";
@@ -84,10 +95,11 @@ export class MessageRouter {
           )
         ) {
           name = "status";
-          const mentioned=this.tasks.projects().filter(p=>text.includes(p.name));
-          if(mentioned.length===1)args=mentioned[0]!.id;
-        }
-        else if (/^继续(?:当前任务|昨天)/.test(text)) {
+          const mentioned = this.tasks
+            .projects()
+            .filter((p) => text.includes(p.name));
+          if (mentioned.length === 1) args = mentioned[0]!.id;
+        } else if (/^继续(?:当前任务|昨天)/.test(text)) {
           name = "continue";
           args = text;
         } else if (/^停止(?:当前)?任务[。！!]?$/u.test(text)) name = "stop";
@@ -140,10 +152,20 @@ export class MessageRouter {
           break;
         }
         case "continue": {
-          const split=args.indexOf('|');
-          const mentioned=this.tasks.projects().filter(p=>args.includes(p.name));
-          const last=split>0?this.current(args.slice(0,split).trim()):mentioned.length===1?this.current(mentioned[0]!.id):this.current();
-          const t = this.tasks.continue(last.projectId, split>0?args.slice(split+1).trim():args);
+          const split = args.indexOf("|");
+          const mentioned = this.tasks
+            .projects()
+            .filter((p) => args.includes(p.name));
+          const last =
+            split > 0
+              ? this.current(args.slice(0, split).trim())
+              : mentioned.length === 1
+                ? this.current(mentioned[0]!.id)
+                : this.current();
+          const t = this.tasks.continue(
+            last.projectId,
+            split > 0 ? args.slice(split + 1).trim() : args,
+          );
           response = `继续指令已排队，复用项目会话：${t.id}`;
           break;
         }
@@ -238,13 +260,16 @@ export class MessageRouter {
     this.notices.enqueue(response, `reply:${m.id}`);
   }
   recover() {
+    const greeting=/^(你好|您好|嗨|hello|hi|在吗|谢谢|谢了|收到)[呀啊吗？?！!。\s]*$/i;
+    for(const m of this.store.all<StoredMessage>('messages'))if(m.status==='received'&&greeting.test(m.text.trim())){m.status='processed';this.store.put('messages',m);}
+    for(const t of this.todos.list())if(t.status==='draft'&&greeting.test(t.title.trim()))this.todos.change(t.id,'cancelled');
     for (const m of this.store
       .all<StoredMessage>("messages")
       .filter((m) => m.status === "processing")) {
       m.status = "uncertain";
       this.store.put("messages", m);
       this.notices.enqueue(
-        "有一条消息在服务中断时尚未确认完成。请先查询 /tasks，避免重复执行。",
+        "有一条消息在服务中断时尚未确认完成。可以问我“现在有哪些任务”，先核对一下，避免重复处理。",
         `uncertain:${m.id}`,
       );
     }

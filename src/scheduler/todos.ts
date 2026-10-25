@@ -6,6 +6,7 @@ import { NotificationManager } from "../notifications/outbox.js";
 import { extractCandidates, parseDate } from "./dates.js";
 const id = () => randomBytes(6).toString("hex");
 export class TodoManager {
+  onCollected?: (todos: Todo[]) => string;
   constructor(
     private store: Store,
     private notices: NotificationManager,
@@ -80,7 +81,9 @@ export class TodoManager {
       .filter((r) => r.todoId === todoId)) {
       r.status = "cancelled";
       this.store.put("reminders", r);
-      for (const d of this.store.all<Delivery>('notification_deliveries').filter(d=>d.dedupeKey.startsWith(`reminder:${r.id}:`))) {
+      for (const d of this.store
+        .all<Delivery>("notification_deliveries")
+        .filter((d) => d.dedupeKey.startsWith(`reminder:${r.id}:`))) {
         if (["pending", "retry"].includes(d.status)) {
           d.status = "cancelled";
           this.store.put("notification_deliveries", d);
@@ -163,7 +166,10 @@ export class TodoManager {
       const ts = this.add(m.text, m.id, m.receivedAt);
       m.status = "processed";
       this.store.put("messages", m);
-      this.notices.enqueue(this.describe(ts), `collected:${m.id}`);
+      this.notices.enqueue(
+        this.onCollected?.(ts) ?? this.describe(ts),
+        `collected:${m.id}`,
+      );
     }
   }
   tick(now = Date.now()) {

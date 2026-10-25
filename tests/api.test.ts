@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { Bridge } from "../src/app/bridge.js";
 import { createApi } from "../src/api/server.js";
 import { fixture } from "./helpers.js";
-import {request as httpRequest} from 'node:http';
+import { request as httpRequest } from "node:http";
 test("HTTP control is localhost-only, rejects CSRF/host spoof and keeps secrets out of state", async () => {
   const f = await fixture();
   const bridge = new Bridge(f.config, {
@@ -41,7 +41,20 @@ test("HTTP control is localhost-only, rejects CSRF/host spoof and keeps secrets 
       body: JSON.stringify({ projectId: f.project.id, title: "attack" }),
     });
     assert.equal(r.status, 403);
-    const spoofedStatus=await new Promise<number|undefined>((resolve,reject)=>{const request=httpRequest(base+'/api/bootstrap',{headers:{Host:'evil.test'}},response=>{response.resume();resolve(response.statusCode);});request.on('error',reject);request.end();});
+    const spoofedStatus = await new Promise<number | undefined>(
+      (resolve, reject) => {
+        const request = httpRequest(
+          base + "/api/bootstrap",
+          { headers: { Host: "evil.test" } },
+          (response) => {
+            response.resume();
+            resolve(response.statusCode);
+          },
+        );
+        request.on("error", reject);
+        request.end();
+      },
+    );
     assert.equal(spoofedStatus, 403);
     assert.equal(f.tasks.tasks().length, 0);
   } finally {

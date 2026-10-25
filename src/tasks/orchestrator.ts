@@ -320,7 +320,7 @@ export class TaskOrchestrator {
       return;
     }
     if (e.method.startsWith("bridge/")) return;
-    if(e.connectionId!==this.codex.connectionId)return;
+    if (e.connectionId !== this.codex.connectionId) return;
     const p = e.params;
     const t = this.tasks().find(
       (t) =>
@@ -344,8 +344,17 @@ export class TaskOrchestrator {
       return;
     }
     if (e.method === "turn/completed") {
-      if(!p.turn?.id)return;
-      if(!this.store.insert('task_events',{id:`completed:${t.id}:${p.turn.id}`,taskId:t.id,at:Date.now(),event:'turn/completed',status:t.status}))return;
+      if (!p.turn?.id) return;
+      if (
+        !this.store.insert("task_events", {
+          id: `completed:${t.id}:${p.turn.id}`,
+          taskId: t.id,
+          at: Date.now(),
+          event: "turn/completed",
+          status: t.status,
+        })
+      )
+        return;
       await this.completed(t, p.turn);
       return;
     }
