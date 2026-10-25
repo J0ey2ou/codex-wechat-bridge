@@ -1,0 +1,31 @@
+{
+  "name": "codex-wechat-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Windows 本地 Codex 与微信任务桥接器",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-ui.mjs",
+    "start": "node dist/src/app/main.js",
+    "dev": "tsx src/app/main.ts",
+    "test": "tsx --test tests/*.test.ts",
+    "check": "tsc --noEmit",
+    "probe:codex": "node scripts/probe-codex.mjs",
+    "smoke:codex": "tsx scripts/smoke-codex.ts"
+  },
+  "dependencies": {
+    "luxon": "3.7.2",
+    "qrcode": "1.5.4"
+  },
+  "devDependencies": {
+    "@types/luxon": "3.7.1",
+    "@types/node": "22.18.6",
+    "@types/qrcode": "1.5.5",
+    "prettier": "3.6.2",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
+  }
+}

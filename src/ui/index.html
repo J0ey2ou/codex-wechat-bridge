@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Codex WeChat Bridge · 本地控制台</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <aside>
+      <div class="brand">
+        <span class="logo">桥</span>
+        <div>Codex WeChat<span>本地任务控制台 · V0.1</span></div>
+      </div>
+      <nav>
+        <button data-page="home" class="active">概览</button
+        ><button data-page="tasks">任务与审批</button
+        ><button data-page="todos">待办与提醒</button
+        ><button data-page="projects">授权项目</button
+        ><button data-page="settings">连接与设置</button>
+      </nav>
+      <div class="aside-note">
+        电脑负责执行<br />微信负责交互<br />Codex 负责处理任务<br /><br /><span
+          class="dot"
+        ></span>
+        仅限本机访问
+      </div>
+    </aside>
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">LOCAL WORKSPACE</p>
+          <h1 id="page-title">运行概览</h1>
+        </div>
+        <div>
+          <span id="refresh-time">正在连接…</span
+          ><button id="refresh" class="secondary">刷新</button>
+        </div>
+      </header>
+      <div id="banner" role="status" hidden></div>
+      <section id="home" class="page">
+        <div id="connections" class="metrics"></div>
+        <div class="columns">
+          <article>
+            <h2>正在处理</h2>
+            <div id="active-tasks"></div>
+          </article>
+          <article>
+            <h2>需要你处理 <span id="approval-count" class="pill">0</span></h2>
+            <div id="home-approvals"></div>
+          </article>
+        </div>
+        <article>
+          <h2>近期提醒</h2>
+          <div id="home-reminders"></div>
+        </article>
+        <article>
+          <h2>最近执行记录</h2>
+          <div id="recent-tasks"></div>
+        </article>
+      </section>
+      <section id="tasks" class="page" hidden>
+        <article>
+          <h2>新建任务</h2>
+          <form id="task-form">
+            <div class="form-row">
+              <label
+                >授权项目<select
+                  name="projectId"
+                  id="task-project"
+                  required
+                ></select></label
+              ><label class="grow"
+                >任务描述<input
+                  name="title"
+                  required
+                  maxlength="8000"
+                  placeholder="检查提醒功能是否存在 Bug"
+              /></label>
+            </div>
+            <label
+              >分阶段执行（可选，每行一个阶段；后续阶段均需审批）<textarea
+                name="stages"
+                rows="3"
+                placeholder="检查代码&#10;运行测试&#10;汇总结果"
+              ></textarea></label
+            ><button>创建任务</button>
+          </form>
+        </article>
+        <article>
+          <h2>待处理审批</h2>
+          <div id="approvals"></div>
+        </article>
+        <article>
+          <h2>全部任务</h2>
+          <div id="task-list"></div>
+        </article>
+      </section>
+      <section id="todos" class="page" hidden>
+        <article>
+          <h2>添加工作消息</h2>
+          <form id="todo-form">
+            <label
+              >消息内容<textarea
+                name="text"
+                required
+                rows="3"
+                placeholder="下周三之前完成论文修改，周二先检查一遍统计结果。"
+              ></textarea></label
+            ><button>解析为待办</button>
+          </form>
+          <p class="hint">
+            日期只有“下午、晚上”等时段时会请求确认。没有日期时可以确认保留为无日期待办。
+          </p>
+        </article>
+        <article>
+          <h2>未完成待办</h2>
+          <div id="todo-list"></div>
+        </article>
+        <article>
+          <h2>提醒与投递</h2>
+          <div id="reminder-list"></div>
+          <h3>最近投递记录</h3>
+          <p class="hint">
+            server_accepted 表示微信服务端接受；手机是否可见未验证。
+          </p>
+          <div id="delivery-list"></div>
+        </article>
+      </section>
+      <section id="projects" class="page" hidden>
+        <article>
+          <h2>添加授权项目</h2>
+          <form id="project-form">
+            <div class="form-row">
+              <label
+                >项目名称<input
+                  name="name"
+                  required
+                  placeholder="人口重建" /></label
+              ><label class="grow"
+                >Windows 绝对路径<input
+                  name="path"
+                  required
+                  placeholder="D:\Projects\population"
+              /></label>
+            </div>
+            <button>授权此项目</button>
+          </form>
+          <p class="hint">
+            仅在本机添加或移除授权。任务默认使用 Codex
+            只读沙箱；文件写入逐次审批。
+          </p>
+        </article>
+        <div id="project-list"></div>
+        <article>
+          <h2>桌面会话兼容范围</h2>
+          <p>
+            可查询同目录历史会话，并在本机选择分叉为 Bridge
+            管理的会话。桌面正在执行的任务不会自动同步到这里。
+          </p>
+          <div id="session-list"></div>
+        </article>
+      </section>
+      <section id="settings" class="page" hidden>
+        <div class="columns">
+          <article>
+            <h2>微信连接</h2>
+            <p id="binding"></p>
+            <div class="actions">
+              <button id="wechat-login">获取扫码二维码</button
+              ><button id="wechat-unbind" class="danger">解除绑定</button
+              ><button id="mock-bind" hidden>绑定模拟用户</button>
+            </div>
+            <div id="qr-panel" hidden>
+              <img
+                id="qr-image"
+                alt="微信授权二维码"
+                width="280"
+                height="280"
+              />
+              <p id="qr-status"></p>
+              <button id="qr-verify" hidden>输入验证码</button
+              ><button id="qr-confirm" hidden>在本机确认绑定此用户</button>
+            </div>
+            <p class="hint">
+              扫码后仍需本机确认。绑定后请向助手发送 /help，建立回复上下文。
+            </p>
+          </article>
+          <article>
+            <h2>Codex 环境</h2>
+            <p>通过官方 App Server 使用现有 ChatGPT 登录，不需要 API Key。</p>
+            <button id="codex-check">检查连接与登录</button>
+            <pre id="codex-result"></pre>
+            <p class="hint">
+              尚未登录时，在本机终端执行 codex login。运行中断时保留
+              UNKNOWN，等待核查。
+            </p>
+          </article>
+        </div>
+        <article>
+          <h2>任务与通知策略</h2>
+          <form id="settings-form">
+            <div class="form-grid">
+              <label>时区<input name="timezone" required /></label
+              ><label
+                >消息整理窗口（分钟）<input
+                  name="collectionMinutes"
+                  type="number"
+                  min="0"
+                  max="10080"
+                  required /></label
+              ><label
+                >静默阈值（分钟，0 关闭）<input
+                  name="staleMinutes"
+                  type="number"
+                  min="0"
+                  max="10080"
+                  required /></label
+              ><label
+                >任务超时（分钟，0 关闭）<input
+                  name="timeoutMinutes"
+                  type="number"
+                  min="0"
+                  max="10080"
+                  required /></label
+              ><label
+                >审批有效期（分钟）<input
+                  name="approvalMinutes"
+                  type="number"
+                  min="1"
+                  max="10080"
+                  required
+              /></label>
+            </div>
+            <label class="checkbox"
+              ><input
+                name="notifyProgress"
+                type="checkbox"
+              />发送阶段完成通知</label
+            ><label class="checkbox"
+              ><input
+                name="autoContinueLowRisk"
+                type="checkbox"
+              />自动继续计划中明确授权的低风险阶段（工具审批始终独立）</label
+            ><button>保存设置</button>
+          </form>
+        </article>
+        <article id="mock-panel" hidden>
+          <h2>模拟微信输入</h2>
+          <p class="hint">仅 Mock 模式显示。此处成功不代表真实微信通信成功。</p>
+          <form id="mock-form">
+            <label
+              >消息<input name="text" required placeholder="/status" /></label
+            ><label class="checkbox"
+              ><input name="forwarded" type="checkbox" />作为转发消息</label
+            ><button>模拟接收</button>
+          </form>
+        </article>
+        <article>
+          <h2>后台运行与开机启动</h2>
+          <p>
+            在项目目录运行 scripts\start.ps1 启动后台服务；scripts\stop.ps1
+            停止。登录 Windows 后自启可运行
+            scripts\enable-autostart.ps1，取消使用
+            scripts\disable-autostart.ps1。
+          </p>
+          <p class="hint">
+            脚本以当前用户权限运行，不创建管理员服务。电脑睡眠或关机期间不会投递提醒，恢复后补发到期事项。
+          </p>
+        </article>
+      </section>
+      <footer>
+        数据保存在本机 SQLite · 不上传原始项目文件 · 真实通信以实际验收结果为准
+      </footer>
+    </main>
+    <dialog id="detail">
+      <div id="detail-content"></div>
+      <button id="detail-close">关闭</button>
+    </dialog>
+  </body>
+</html>

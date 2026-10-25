@@ -1,0 +1,14 @@
+{
+  "port": 3210,
+  "timezone": "Asia/Shanghai",
+  "dataDir": "./data",
+  "codexBin": "codex",
+  "codexMode": "real",
+  "wechatMode": "real",
+  "collectionMinutes": 15,
+  "staleMinutes": 10,
+  "timeoutMinutes": 120,
+  "approvalMinutes": 30,
+  "notifyProgress": true,
+  "autoContinueLowRisk": false
+}
