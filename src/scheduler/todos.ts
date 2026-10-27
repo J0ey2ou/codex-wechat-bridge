@@ -159,6 +159,7 @@ export class TodoManager {
       .all<StoredMessage>("messages")
       .filter(
         (m) =>
+          m.userId === this.store.setting("boundUser", "") &&
           m.status === "received" &&
           m.collectAt !== undefined &&
           m.collectAt <= now,
@@ -184,8 +185,11 @@ export class TodoManager {
       }
       this.store.transaction(() => {
         const deliveryId = this.notices.enqueue(
-          `提醒：${t.title}\n待办 ${t.id}\n完成后回复 /done ${t.id}`,
+          `提醒：${t.title}\n完成后直接告诉我“这件事做完了”，或说出事情的名字。`,
           `reminder:${r.id}:${r.dueAt}`,
+          undefined,
+          "notification",
+          r.dueAt,
         );
         if (!deliveryId) return;
         r.deliveryId = deliveryId;

@@ -2,13 +2,17 @@
   "port": 3210,
   "timezone": "Asia/Shanghai",
   "dataDir": "./data",
+  "projectCreationRoot": "./projects",
   "codexBin": "codex",
   "codexMode": "real",
+  "codexTransport": "default",
   "wechatMode": "real",
   "collectionMinutes": 15,
   "staleMinutes": 10,
   "timeoutMinutes": 120,
   "approvalMinutes": 30,
   "notifyProgress": true,
-  "autoContinueLowRisk": false
+  "autoContinueLowRisk": false,
+  "executionAuthorization": "bound-user",
+  "wechatPushEnabled": true
 }

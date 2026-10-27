@@ -15,11 +15,20 @@ export function safeText(value: unknown, max = 1200): string {
   return String(value ?? "")
     .replace(/(Bearer\s+)[^\s"']+/gi, "$1[REDACTED]")
     .replace(
-      /((?:api[_-]?key|access[_-]?token|refresh[_-]?token|bot[_-]?token|context[_-]?token|password)\s*[=:]\s*)[^\s,;]+/gi,
+      /(["'](?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|bot[_-]?token|context[_-]?token|client[_-]?secret|password|passwd|authorization|secret|token)["']\s*:\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/gi,
+      '$1"[REDACTED]"',
+    )
+    .replace(
+      /((?:api[_-]?key|access[_-]?token|refresh[_-]?token|bot[_-]?token|context[_-]?token|client[_-]?secret|password|passwd|authorization)\s*[=:]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)/gi,
       "$1[REDACTED]",
     )
     .replace(/\bsk-[A-Za-z0-9_-]{12,}/g, "[REDACTED]")
     .slice(0, max);
+}
+export function sensitiveKey(key: string) {
+  return /^(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|bot[_-]?token|context[_-]?token|client[_-]?secret|password(?:[_-]?hash)?|passwd|authorization|secret|token)$/i.test(
+    key,
+  );
 }
 export function commandRisk(command: string): string {
   return /remove-item|\brm\b|\bdel\b|format-|diskpart|reg\s|shutdown|curl|invoke-webrequest|set-executionpolicy|git\s+(reset|clean|push)|\bpython\b|\bpowershell\b|\bnode\b/i.test(

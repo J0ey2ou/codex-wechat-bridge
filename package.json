@@ -1,6 +1,6 @@
 {
-  "name": "codex-wechat-bridge",
-  "version": "0.1.0",
+  "name": "robinson-app",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Windows 本地 Codex 与微信任务桥接器",
@@ -8,21 +8,27 @@
     "node": ">=22.13.0"
   },
   "scripts": {
+    "app": "node scripts/robinson.mjs",
+    "test:in-process": "node --test --test-isolation=none dist/tests/*.test.js",
     "build": "tsc -p tsconfig.json && node scripts/copy-ui.mjs",
     "start": "node dist/src/app/main.js",
     "dev": "tsx src/app/main.ts",
     "test": "tsx --test tests/*.test.ts",
     "check": "tsc --noEmit",
     "probe:codex": "node scripts/probe-codex.mjs",
-    "smoke:codex": "tsx scripts/smoke-codex.ts"
+    "smoke:codex": "tsx scripts/smoke-codex.ts",
+    "smoke:chat": "tsx scripts/smoke-chat.ts",
+    "package:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows.ps1"
   },
   "dependencies": {
     "luxon": "3.7.2",
+    "pdfkit": "0.20.2",
     "qrcode": "1.5.4"
   },
   "devDependencies": {
     "@types/luxon": "3.7.1",
     "@types/node": "22.18.6",
+    "@types/pdfkit": "0.17.3",
     "@types/qrcode": "1.5.5",
     "prettier": "3.6.2",
     "tsx": "4.20.6",

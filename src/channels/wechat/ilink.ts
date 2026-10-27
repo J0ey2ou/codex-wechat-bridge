@@ -1,4 +1,9 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import {
+  randomBytes,
+  randomUUID,
+  createCipheriv,
+  createHash,
+} from "node:crypto";
 import type {
   ChannelStatus,
   InboundMessage,
@@ -19,6 +24,21 @@ interface Context {
   updatedAt: number;
 }
 export class DeliveryUncertainError extends Error {}
+const CDN = "https://novac2c.cdn.weixin.qq.com/c2c";
+export function trustedUpload(value: string) {
+  const u = new URL(value);
+  if (
+    u.protocol !== "https:" ||
+    u.hostname !== "novac2c.cdn.weixin.qq.com" ||
+    u.port ||
+    u.username ||
+    u.password ||
+    u.hash ||
+    u.pathname !== "/c2c/upload"
+  )
+    throw new Error("微信返回了不受信任的文件上传地址");
+  return u.href;
+}
 export function trustedBase(value: string): string {
   const u = new URL(value.includes("://") ? value : `https://${value}`);
   if (
@@ -246,6 +266,7 @@ export class ILinkAdapter implements WeChatAdapter {
         this.state = "CONNECTED";
         this.lastError = undefined;
         failures = 0;
+        const transportReceivedAt = Date.now();
         for (const raw of r.msgs ?? []) {
           if (
             raw.message_type !== 1 ||
@@ -275,6 +296,7 @@ export class ILinkAdapter implements WeChatAdapter {
             userId: raw.from_user_id,
             text: text.slice(0, 12000),
             sentAt: Number(raw.create_time_ms),
+            transportReceivedAt,
             kind: items.some((i: any) => i.ref_msg || i.type !== 1)
               ? "forwarded"
               : "direct",
@@ -316,12 +338,112 @@ export class ILinkAdapter implements WeChatAdapter {
     text: string,
     clientId: string,
   ): Promise<SendResult> {
+    return this.sendItems(userId, [{ type: 1, text_item: { text } }], clientId);
+  }
+  private sendingContext(userId: string) {
     const c = this.credentials;
     const context = this.contexts[userId];
+    if (userId !== this.store.setting("boundUser", "") || c?.userId !== userId)
+      throw new Error("绑定用户已改变");
     if (!c || this.state === "AUTH_REQUIRED") throw new Error("微信尚未授权");
     if (!context) throw new Error("缺少回复上下文，请先在微信发送 /help");
     if (Date.now() - context.updatedAt > 24 * 3600000)
       throw new Error("回复上下文已超过本地有效期，请在微信发送新消息");
+    return { c, context };
+  }
+  async sendFile(
+    userId: string,
+    file: { name: string; bytes: Buffer },
+    clientId: string,
+  ): Promise<SendResult> {
+    const { c } = this.sendingContext(userId);
+    if (
+      !/\.pdf$/i.test(file.name) ||
+      /[<>:"/\\|?*\x00-\x1f]/.test(file.name) ||
+      file.name.length > 100 ||
+      file.bytes.length > 10 * 1024 * 1024 ||
+      file.bytes.subarray(0, 5).toString() !== "%PDF-"
+    )
+      throw new Error("只允许发送有效且不超过 10 MB 的 PDF 报告");
+    const key = randomBytes(16),
+      filekey = randomBytes(16).toString("hex");
+    const cipher = createCipheriv("aes-128-ecb", key, null);
+    const encrypted = Buffer.concat([
+      cipher.update(file.bytes),
+      cipher.final(),
+    ]);
+    const upload = await this.api(
+      c.baseUrl,
+      "ilink/bot/getuploadurl",
+      {
+        filekey,
+        media_type: 3,
+        to_user_id: userId,
+        rawsize: file.bytes.length,
+        rawfilemd5: createHash("md5").update(file.bytes).digest("hex"),
+        filesize: encrypted.length,
+        no_need_thumb: true,
+        aeskey: key.toString("hex"),
+        base_info: { channel_version: "0.1.0", bot_agent: "CodexWeChatBridge" },
+      },
+      c.token,
+    );
+    this.sendingContext(userId);
+    const url =
+      typeof upload.upload_full_url === "string" && upload.upload_full_url
+        ? upload.upload_full_url
+        : typeof upload.upload_param === "string" && upload.upload_param
+          ? `${CDN}/upload?encrypted_query_param=${encodeURIComponent(upload.upload_param)}&filekey=${filekey}`
+          : "";
+    if (!url) throw new Error("微信未返回文件上传地址");
+    let response: Response;
+    try {
+      response = await this.fetcher(trustedUpload(url), {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: new Uint8Array(encrypted),
+        redirect: "error",
+        signal: AbortSignal.timeout(60000),
+      });
+    } catch {
+      throw new Error("PDF 上传失败，尚未发送文件消息");
+    }
+    const downloadParam = response.headers.get("x-encrypted-param");
+    await response.body?.cancel();
+    if (
+      response.status !== 200 ||
+      !downloadParam ||
+      downloadParam.length > 16000
+    )
+      throw new Error("PDF 上传未获确认，尚未发送文件消息");
+    this.sendingContext(userId);
+    if (this.credentials !== c)
+      throw new Error("微信登录已变化，文件消息未发送");
+    return this.sendItems(
+      userId,
+      [
+        {
+          type: 4,
+          file_item: {
+            media: {
+              encrypt_query_param: downloadParam,
+              aes_key: Buffer.from(key.toString("hex")).toString("base64"),
+              encrypt_type: 1,
+            },
+            file_name: file.name,
+            len: String(file.bytes.length),
+          },
+        },
+      ],
+      clientId,
+    );
+  }
+  private async sendItems(
+    userId: string,
+    items: unknown[],
+    clientId: string,
+  ): Promise<SendResult> {
+    const { c, context } = this.sendingContext(userId);
     try {
       await this.api(
         c.baseUrl,
@@ -334,7 +456,7 @@ export class ILinkAdapter implements WeChatAdapter {
             message_type: 2,
             message_state: 2,
             context_token: context.token,
-            item_list: [{ type: 1, text_item: { text } }],
+            item_list: items,
           },
           base_info: {
             channel_version: "0.1.0",

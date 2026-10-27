@@ -1,7 +1,12 @@
-import { AppServerClient } from "../src/codex/client.js";
+import { AppServerClient, appServerArgs } from "../src/codex/client.js";
+import { loadConfig } from "../src/app/config.js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-const c = new AppServerClient(process.env.BRIDGE_CODEX_BIN || "codex");
+const config = loadConfig();
+const c = new AppServerClient(
+  config.codexBin,
+  appServerArgs(config.codexTransport),
+);
 const report: Record<string, unknown> = {
   startedAt: new Date().toISOString(),
   kind: "REAL_CODEX",
@@ -11,7 +16,7 @@ const finished = new Map<string, any>();
 let events = 0;
 const eventTypes = new Map<string, number>();
 const errors: string[] = [];
-const startup:unknown[]=[];
+const startup: unknown[] = [];
 const started = new Set<string>();
 c.onEvent((e) => {
   events++;
@@ -23,7 +28,11 @@ c.onEvent((e) => {
   if (e.method === "turn/started") started.add(e.params.turn.id);
   if (e.method === "error")
     errors.push(String(e.params.error?.message ?? "error").slice(0, 600));
-  if(e.method==='mcpServer/startupStatus/updated')startup.push({status:e.params.status,failureReason:e.params.failureReason});
+  if (e.method === "mcpServer/startupStatus/updated")
+    startup.push({
+      status: e.params.status,
+      failureReason: e.params.failureReason,
+    });
 });
 async function waitTurn(id: string) {
   const until = Date.now() + 45000;
@@ -36,34 +45,36 @@ async function waitTurn(id: string) {
 try {
   await c.connect();
   report.handshake = "PASS";
-  const a = await c.request("account/read", { refreshToken: false });
-  report.accountType = a.account?.type ?? null;
+  try {
+    const a = await c.request("account/read", { refreshToken: false });
+    report.accountType = a.account?.type ?? null;
+  } catch (e) {
+    report.accountError = String(e); // Keep testing inference independently of account metadata availability.
+  }
   const listed = await c.request("thread/list", { limit: 5 });
   report.listCount = listed.data.length;
-  let overrides: Record<string, unknown> | undefined;
-  if (process.env.BRIDGE_SMOKE_NO_MCP === "1") {
-    const servers = await c.request("mcpServerStatus/list", {
-      limit: 100,
-      detail: "toolsAndAuthOnly",
-    });
-    overrides = Object.fromEntries(
-      servers.data.map((s: any) => [`mcp_servers.${s.name}.enabled`, false]),
-    );
-    report.disabledMcpCount = servers.data.length;
-  }
   const r = await c.request("thread/start", {
     cwd: process.cwd(),
     approvalPolicy: "untrusted",
     approvalsReviewer: "user",
     sandbox: "read-only",
-    ...(overrides ? { config: overrides } : {}),
+    config: {
+      "features.apps": false,
+      "features.plugins": false,
+      "features.shell_tool": false,
+      web_search: "disabled",
+    },
   });
   report.model = r.model;
-  console.log('thread/start:',JSON.stringify({model:r.model,sandbox:r.sandbox?.type}));
+  console.log(
+    "thread/start:",
+    JSON.stringify({ model: r.model, sandbox: r.sandbox?.type }),
+  );
   threadId = r.thread.id;
   report.threadId = threadId;
   report.threadStart = "PASS";
   const turn = await c.request("turn/start", {
+    effort: "low",
     threadId,
     input: [
       {
@@ -73,7 +84,7 @@ try {
     ],
     sandboxPolicy: { type: "readOnly", networkAccess: false },
   });
-  console.log('turn/start:',JSON.stringify({status:turn.turn.status}));
+  console.log("turn/start:", JSON.stringify({ status: turn.turn.status }));
   try {
     report.firstTurn = (await waitTurn(turn.turn.id)).status;
   } catch {
@@ -93,6 +104,7 @@ try {
   });
   report.resume = "PASS";
   const t2 = await c.request("turn/start", {
+    effort: "low",
     threadId,
     input: [
       {
@@ -122,7 +134,7 @@ try {
 } finally {
   report.eventTypes = Object.fromEntries(eventTypes);
   report.errors = errors;
-  report.mcpStartup=startup;
+  report.mcpStartup = startup;
   if (report.firstTurn !== "completed") process.exitCode = 1;
   await c.disconnect();
   mkdirSync("test-output", { recursive: true });

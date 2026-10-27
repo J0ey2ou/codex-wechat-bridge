@@ -12,6 +12,7 @@ export class DesktopSessionAdapter {
   async list(cwd: string, cursor?: string) {
     const r = await this.codex.request("thread/list", {
       limit: 30,
+      modelProviders: [],
       cwd,
       ...(cursor ? { cursor } : {}),
     });

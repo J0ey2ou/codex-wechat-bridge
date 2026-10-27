@@ -8,3 +8,9 @@ config.local.json
 *.log
 docs/reference/
 test-output/
+.test-tmp/
+release/
+/projects/
+
+.tools/
+.npm-cache/

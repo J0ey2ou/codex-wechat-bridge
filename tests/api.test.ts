@@ -31,6 +31,35 @@ test("HTTP control is localhost-only, rejects CSRF/host spoof and keeps secrets 
     const state = (await r.json()) as any;
     assert.equal(state.boundUser, "owner");
     assert.equal(JSON.stringify(state).includes("csrf"), false);
+    assert.equal(state.messageLatency.modelRound.samples, 0);
+    assert.equal(state.messageLatency.sendRequest.medianMs, null);
+    assert.equal(
+      state.capabilities.desktopActivity,
+      "read-only-observation-v1",
+    );
+    assert.deepEqual(state.desktopActivity.threads, []);
+    r = await fetch(base + "/api/activity/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    assert.equal(r.status, 403);
+    r = await fetch(base + "/api/notification-report");
+    assert.equal(r.status, 403);
+    r = await fetch(base + "/api/notification-report", {
+      headers: { "x-bridge-token": boot.csrf },
+    });
+    assert.equal(r.status, 200);
+    const report = (await r.json()) as { text: string };
+    assert.match(report.text, /模拟通道|未停止或重启/);
+    r = await fetch(base + "/api/project-issues");
+    assert.equal(r.status, 403);
+    r = await fetch(base + "/api/project-issues", {
+      headers: { "x-bridge-token": boot.csrf },
+    });
+    assert.equal(r.status, 200);
+    assert.match(((await r.json()) as { text: string }).text, /文献打包/);
+    assert.deepEqual(state.routingRequests, []);
     r = await fetch(base + "/api/tasks/create", {
       method: "POST",
       headers: {

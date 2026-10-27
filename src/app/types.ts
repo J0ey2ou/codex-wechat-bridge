@@ -12,6 +12,13 @@ export interface Project {
   id: string;
   name: string;
   path: string;
+  codexProjectId?: string;
+  requestedModel?: string;
+  executionModel?: string;
+  creationId?: string;
+  visibilityError?: string;
+  sessionCodexProjectId?: string;
+  sessionsByCodexProject?: Record<string, string>;
   sessionId?: string;
   sessionOrigin?: "bridge" | "desktop-fork";
   createdAt: number;
@@ -25,7 +32,32 @@ export interface Stage {
 export interface Task {
   id: string;
   projectId: string;
+  codexProjectId?: string;
+  requestedModel?: string;
+  executionModel?: string;
+  modelMismatch?: string;
+  creationId?: string;
   title: string;
+  sourceMessageId?: string;
+  sourceMessageIds?: string[];
+  routingRequestId?: string;
+  targetThreadId?: string;
+  targetThreadName?: string;
+  targetVerifiedAt?: number;
+  targetResumedAt?: number;
+  targetWaitReason?: string;
+  targetCheckAfter?: number;
+  continuesTaskId?: string;
+  continuationFingerprint?: string;
+  expectedHistoryRevision?: string;
+  dispatchAttemptId?: string;
+  reconciliationAfter?: number;
+  reconciliationNote?: string;
+  pdfRequested?: boolean;
+  pdfReportId?: string;
+  pdfRetryAfter?: number;
+  pdfAttempts?: number;
+  pdfError?: string;
   status: TaskStatus;
   stages: Stage[];
   stageIndex: number;
@@ -33,10 +65,12 @@ export interface Task {
   turnId?: string;
   createdAt: number;
   startedAt?: number;
+  queueOrder?: number;
   endedAt?: number;
   lastActivityAt: number;
   lastEvent: string;
   summary?: string;
+  userMessage?: string;
   files: string[];
   tests: string[];
   processIds: string[];
@@ -66,11 +100,13 @@ export interface InboundMessage {
   sentAt: number;
   kind: "direct" | "forwarded";
   contextToken?: string;
+  transportReceivedAt?: number;
 }
 export interface StoredMessage extends InboundMessage {
   receivedAt: number;
   status: "received" | "processing" | "processed" | "uncertain" | "rejected";
   collectAt?: number;
+  routedAt?: number;
 }
 export interface Todo {
   id: string;
@@ -95,6 +131,10 @@ export interface Delivery {
   id: string;
   userId: string;
   text: string;
+  kind?: "reply" | "notification";
+  notificationEpoch?: number;
+  occurredAt?: number;
+  suppressedAt?: number;
   status:
     | "pending"
     | "sending"
@@ -102,7 +142,8 @@ export interface Delivery {
     | "server_accepted"
     | "delivery_unverified"
     | "failed"
-    | "cancelled";
+    | "cancelled"
+    | "suppressed";
   attempts: number;
   nextAttemptAt: number;
   createdAt: number;
@@ -110,6 +151,17 @@ export interface Delivery {
   acceptedAt?: number;
   clientVisible: false;
   dedupeKey: string;
+  sequence?: number;
+  messageId?: string;
+  documentId?: string;
+  receipt?: boolean;
+  expiresAt?: number;
+  backendOnly?: boolean;
+  detailText?: string;
+  policyRevision?: number;
+  layout?: "paragraph" | "structured";
+  sendStartedAt?: number;
+  sendFinishedAt?: number;
 }
 export interface RpcEvent {
   method: string;
@@ -150,6 +202,11 @@ export interface WeChatAdapter {
   sendMessage(
     userId: string,
     text: string,
+    clientId: string,
+  ): Promise<SendResult>;
+  sendFile?(
+    userId: string,
+    file: { name: string; bytes: Buffer },
     clientId: string,
   ): Promise<SendResult>;
   getConnectionStatus(): ChannelStatus;

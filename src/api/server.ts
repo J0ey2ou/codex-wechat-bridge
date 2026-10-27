@@ -19,7 +19,57 @@ import { validateSettings } from "../app/config.js";
 import { ILinkAdapter } from "../channels/wechat/ilink.js";
 import { MockWeChat } from "../channels/wechat/mock.js";
 import { safeText } from "../security/policy.js";
+import { messageLatency } from "../notifications/latency.js";
+import type { Question } from "../codex/questions.js";
+import { executionProject } from "../computer/projects.js";
+import { answerAccount } from "../codex/account.js";
+import {
+  ThreadContinuation,
+  CONTINUATION_REVISION,
+} from "../codex/continuation.js";
+import { ThreadTargets } from "../codex/thread-target.js";
+import { effectiveVoice } from "../app/dialogue.js";
+import { BUILD } from "../app/build.js";
+import { localReport } from "../reports/local.js";
 export function createApi(bridge: Bridge, port = bridge.config.port) {
+  const report = (
+    name: "runtime-upgrade-report" | "project-issues" | "notification-report",
+  ) =>
+    readFileSync(new URL(`../ui/${name}.txt`, import.meta.url), "utf8") +
+    localReport(
+      bridge.config.dataDir,
+      bridge.store.setting("boundUser", ""),
+      name,
+    );
+  const continuation = new ThreadContinuation(
+    bridge.store,
+    bridge.tasks,
+    bridge.codex,
+    bridge.computer.workspaces,
+  );
+  const currentUser = () => {
+    const user = bridge.store.setting("boundUser", "");
+    if (!user) throw new Error("请先绑定微信用户");
+    return user;
+  };
+  const idle = (all = false) => {
+    if (
+      bridge.store
+        .all<Question>("questions")
+        .some(
+          (q) =>
+            q.userId === bridge.store.setting("boundUser", "") &&
+            ["queued", "running", "dispatching"].includes(q.status),
+        ) ||
+      (all &&
+        bridge.tasks
+          .tasks()
+          .some(
+            (t) => !["COMPLETED", "FAILED", "INTERRUPTED"].includes(t.status),
+          ))
+    )
+      throw new Error("请等待当前对话或任务完成后再操作，避免切换中的数据混用");
+  };
   const csrf = randomBytes(32).toString("hex");
   const hosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
   const json = (res: ServerResponse, status: number, data: unknown) => {
@@ -67,7 +117,14 @@ export function createApi(bridge: Bridge, port = bridge.config.port) {
     try {
       if (
         req.method === "GET" &&
-        ["/", "/app.js", "/style.css"].includes(route!)
+        [
+          "/",
+          "/app.js",
+          "/style.css",
+          "/manifest.webmanifest",
+          "/icon.svg",
+          "/sw.js",
+        ].includes(route!)
       ) {
         const f = route === "/" ? "index.html" : route!.slice(1);
         const url = new URL(`../ui/${f}`, import.meta.url);
@@ -81,17 +138,26 @@ export function createApi(bridge: Bridge, port = bridge.config.port) {
         }
         res.setHeader(
           "Content-Type",
-          f.endsWith(".js")
-            ? "text/javascript; charset=utf-8"
-            : f.endsWith(".css")
-              ? "text/css; charset=utf-8"
-              : "text/html; charset=utf-8",
+          f.endsWith(".webmanifest")
+            ? "application/manifest+json; charset=utf-8"
+            : f.endsWith(".svg")
+              ? "image/svg+xml"
+              : f.endsWith(".js")
+                ? "text/javascript; charset=utf-8"
+                : f.endsWith(".css")
+                  ? "text/css; charset=utf-8"
+                  : "text/html; charset=utf-8",
         );
         res.end(content);
         return;
       }
       if (req.method === "GET" && route === "/api/bootstrap") {
-        json(res, 200, { csrf, version: "0.1.0" });
+        json(res, 200, {
+          csrf,
+          version: "0.3.0",
+          name: "鲁滨逊",
+          build: BUILD,
+        });
         return;
       }
       const supplied = String(req.headers["x-bridge-token"] ?? "");
@@ -104,9 +170,52 @@ export function createApi(bridge: Bridge, port = bridge.config.port) {
       }
       const b = req.method === "POST" ? await body(req) : {};
       let result: unknown = { ok: true };
-      if (req.method === "GET" && route === "/api/state") {
+      if (req.method === "GET" && route === "/api/reports") {
+        result = bridge.reports.list(currentUser());
+      } else if (req.method === "POST" && route === "/api/reports/download") {
+        const file = bridge.reports.read(String(b.id ?? ""), currentUser());
+        res.writeHead(200, {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+          "Content-Length": file.bytes.length,
+        });
+        res.end(file.bytes);
+        return;
+      } else if (req.method === "GET" && route === "/api/memory") {
         result = {
-          version: "0.1.0",
+          ...bridge.memory.view(currentUser()),
+          effectiveVoice: effectiveVoice(bridge.memory.context(currentUser())),
+        };
+      } else if (req.method === "GET" && route === "/api/openai/status") {
+        result = await bridge.auth.status();
+      } else if (req.method === "GET" && route === "/api/evidence") {
+        result = {
+          records: bridge.store.all("inference_records").slice(0, 100),
+          note: "threadModel 是服务端会话配置；actualModel 仅在轮次明确报告时填写。token 不等于余额；额度请使用 Bridge 账户查询核实。",
+        };
+      } else if (req.method === "GET" && route === "/api/notification-report") {
+        result = {
+          text: report("notification-report"),
+        };
+      } else if (req.method === "GET" && route === "/api/project-issues") {
+        result = {
+          text: report("runtime-upgrade-report") + report("project-issues"),
+        };
+      } else if (req.method === "GET" && route === "/api/state") {
+        result = {
+          version: "0.3.0",
+          build: BUILD,
+          runtime: {
+            managed: process.env.ROBINSON_MANAGED === "1",
+            bundledCodex: process.env.ROBINSON_BUNDLED_CODEX === "1",
+          },
+          name: "鲁滨逊",
+          capabilities: {
+            originalThreadContinuation: CONTINUATION_REVISION,
+            pdfReports: "ilink-file-v1",
+            desktopActivity: "read-only-observation-v1",
+          },
+          messageLatency: messageLatency(bridge.store),
           modes: {
             codex: bridge.config.codexMode,
             wechat: bridge.config.wechatMode,
@@ -117,7 +226,22 @@ export function createApi(bridge: Bridge, port = bridge.config.port) {
             codexError: bridge.store.setting("codexError", null),
           },
           projects: bridge.tasks.projects(),
+          availableProjects: bridge.computer.workspaces.snapshot().projects,
           tasks: bridge.tasks.tasks(),
+          routingRequests: bridge.store.all("routing_requests").slice(0, 30),
+          reports: bridge.store.all("pdf_reports").slice(0, 30),
+          messageAnalysis: bridge.store
+            .all<Question>("questions")
+            .filter((q) => q.userId === bridge.store.setting("boundUser", ""))
+            .slice(0, 20)
+            .map(({ toolCalls, ...question }) => ({
+              ...question,
+              toolCalls: toolCalls?.map(({ request, completedAt }) => ({
+                request,
+                completedAt,
+              })),
+            })),
+          discoveredWorkspaces: bridge.computer.workspaces.snapshot(),
           approvals: bridge.store
             .all<Approval>("approvals")
             .filter((a) => a.status === "pending"),
@@ -125,6 +249,7 @@ export function createApi(bridge: Bridge, port = bridge.config.port) {
           reminders: bridge.store.all<Reminder>("reminders"),
           deliveries: bridge.store
             .all<Delivery>("notification_deliveries")
+            .filter((d) => d.userId === bridge.store.setting("boundUser", ""))
             .slice(0, 40),
           boundUser: bridge.store.setting("boundUser", null),
           heartbeat: bridge.store.setting("heartbeat", null),
@@ -136,12 +261,69 @@ export function createApi(bridge: Bridge, port = bridge.config.port) {
             timeoutMinutes: bridge.config.timeoutMinutes,
             approvalMinutes: bridge.config.approvalMinutes,
             notifyProgress: bridge.config.notifyProgress,
+            wechatPushEnabled: bridge.notices.isPushEnabled(),
             autoContinueLowRisk: bridge.config.autoContinueLowRisk,
+            executionAuthorization: bridge.config.executionAuthorization,
           },
           desktopCapabilities: bridge.desktop.capabilities,
+          desktopCompletion: bridge.completions.snapshot(),
+          desktopActivity: bridge.activity.snapshot(),
         };
       } else if (req.method === "POST")
         switch (route) {
+          case "/api/activity/refresh":
+            await bridge.activity.tick(Date.now(), true);
+            result = bridge.activity.snapshot();
+            break;
+          case "/api/openai/login":
+            idle(true);
+            await bridge.connectCodex();
+            result = await bridge.auth.start();
+            break;
+          case "/api/openai/cancel":
+            await bridge.auth.cancel();
+            break;
+          case "/api/openai/logout":
+            idle(true);
+            await bridge.auth.logout();
+            break;
+          case "/api/openai/usage":
+            result = {
+              checkedAt: Date.now(),
+              account: await bridge.auth.status(),
+              limits: await answerAccount(
+                bridge.codex,
+                "剩余额度",
+                bridge.config.timezone,
+              ),
+            };
+            break;
+          case "/api/memory/save":
+          case "/api/memory/delete":
+          case "/api/memory/settings":
+          case "/api/memory/clear": {
+            idle();
+            if (b.userId !== undefined || b.ownerId !== undefined)
+              throw new Error("不能指定其他用户");
+            const user = currentUser();
+            if (route.endsWith("/save"))
+              result = bridge.memory.save(
+                user,
+                String(b.text ?? ""),
+                "dashboard",
+                b.id === undefined ? undefined : String(b.id),
+              );
+            if (route.endsWith("/delete"))
+              result = bridge.memory.remove(user, String(b.id));
+            if (route.endsWith("/settings"))
+              result = bridge.memory.update(user, b);
+            if (route.endsWith("/clear")) {
+              if (b.confirm !== "清空我的记忆")
+                throw new Error("请明确确认清空范围");
+              result = bridge.memory.clear(user, b.history === true);
+            }
+            break;
+          }
           case "/api/projects/add":
             result = bridge.tasks.addProject(
               String(b.name ?? ""),
@@ -151,9 +333,26 @@ export function createApi(bridge: Bridge, port = bridge.config.port) {
           case "/api/projects/remove":
             bridge.tasks.removeProject(String(b.id));
             break;
+          case "/api/runtime/stop":
+            idle(true);
+            if (
+              bridge.store
+                .all<Delivery>("notification_deliveries")
+                .some((d) => ["pending", "retry", "sending"].includes(d.status))
+            )
+              throw new Error("消息仍在发送，稍后再退出即可");
+            if (!bridge.onShutdown)
+              throw new Error("当前运行方式不支持受控退出");
+            setImmediate(() => bridge.onShutdown?.());
+            break;
           case "/api/tasks/create":
-            result = bridge.tasks.create(
+            const selectedProject = await executionProject(
+              bridge.tasks,
+              bridge.computer.workspaces,
               String(b.projectId),
+            );
+            result = bridge.tasks.create(
+              selectedProject.id,
               String(b.title ?? ""),
               b.stages,
             );
@@ -211,6 +410,7 @@ export function createApi(bridge: Bridge, port = bridge.config.port) {
                   "timeoutMinutes",
                   "approvalMinutes",
                   "notifyProgress",
+                  "wechatPushEnabled",
                   "autoContinueLowRisk",
                 ].includes(k),
               ),
@@ -221,6 +421,8 @@ export function createApi(bridge: Bridge, port = bridge.config.port) {
               ...bridge.store.setting("preferences", {}),
               ...patch,
             });
+            if (typeof patch.wechatPushEnabled === "boolean")
+              bridge.notices.setPushEnabled(patch.wechatPushEnabled);
             break;
           }
           case "/api/codex/check":
@@ -241,10 +443,35 @@ export function createApi(bridge: Bridge, port = bridge.config.port) {
             }
             break;
           case "/api/sessions/list":
-            result = await bridge.desktop.list(
-              bridge.tasks.project(String(b.projectId)).path,
-              b.cursor,
-            );
+            result = {
+              data: await new ThreadTargets(bridge.store, bridge.codex).list(
+                await executionProject(
+                  bridge.tasks,
+                  bridge.computer.workspaces,
+                  String(b.projectId),
+                ),
+                currentUser(),
+              ),
+              nextCursor: null,
+            };
+            break;
+          case "/api/sessions/inspect":
+            result = await continuation.inspect(currentUser(), b);
+            break;
+          case "/api/sessions/continue": {
+            const task = await continuation.submit(currentUser(), b);
+            result = {
+              task,
+              accepted: true,
+              resumed: !!task.targetResumedAt,
+              note: task.turnId
+                ? "已确认原轮次编号，请按任务状态查看结果。"
+                : "要求已保存排队，尚未确认开始执行。",
+            };
+            break;
+          }
+          case "/api/sessions/continuation/status":
+            result = { task: continuation.status(currentUser(), b.requestId) };
             break;
           case "/api/sessions/fork": {
             const p = bridge.tasks.project(String(b.projectId));
@@ -301,6 +528,7 @@ export function createApi(bridge: Bridge, port = bridge.config.port) {
             }
             break;
           case "/api/wechat/unbind":
+            idle(true);
             if (b.confirm !== "本机确认") throw new Error("需要本机确认");
             if (
               bridge.tasks

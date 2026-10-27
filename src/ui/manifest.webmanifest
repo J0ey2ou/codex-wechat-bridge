@@ -1,0 +1,20 @@
+{
+  "id": "/",
+  "name": "鲁滨逊",
+  "short_name": "鲁滨逊",
+  "description": "你的本地 AI 工作伙伴",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f6f5",
+  "theme_color": "#176b53",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -20,7 +20,7 @@ test("SQLite migrations and persistent data survive restart", () => {
   db.put("projects", { id: "p", name: "持久化" });
   assert.equal(
     db.db.prepare("SELECT COUNT(*) n FROM schema_migrations").get()?.n,
-    1,
+    6,
   );
   db.close();
   db = new Store(file);
@@ -105,7 +105,7 @@ test("message dedupe, acknowledgement, command route, and replay protection", as
   await f.router.receive({ ...m, id: "2", sentAt: Date.now() - 3600000 });
   assert.equal(f.tasks.tasks().length, 1);
   await f.notices.flush();
-  assert.ok(f.channel.sent.some((s) => s.text.includes("已收到")));
+  assert.ok(f.channel.sent.some((s) => s.text === "收到了，我处理一下。"));
 });
 test("forwarded command is data, never executable", async () => {
   const f = await fixture();
@@ -120,7 +120,7 @@ test("forwarded command is data, never executable", async () => {
   assert.equal(f.tasks.tasks().length, 0);
   assert.equal(f.todos.list().length, 1);
 });
-test("natural language task launch requires recognized explicit intent", async () => {
+test("natural language task launch waits for Codex decision", async () => {
   const f = await fixture();
   await f.router.receive({
     id: "natural",
@@ -129,9 +129,15 @@ test("natural language task launch requires recognized explicit intent", async (
     sentAt: Date.now(),
     kind: "direct",
   });
+  assert.equal(f.tasks.tasks().length, 0);
+  await f.decide("natural", {
+    action: "run",
+    projectId: f.project.id,
+    text: "检查代码",
+  });
   assert.equal(f.tasks.tasks().length, 1);
 });
-test("natural status includes all required fields without imaginary ETA", async () => {
+test("status is brief by default while detailed status remains available on request", async () => {
   const f = await fixture();
   f.tasks.create(f.project.id, "检查");
   await f.tasks.pump();
@@ -142,22 +148,29 @@ test("natural status includes all required fields without imaginary ETA", async 
     sentAt: Date.now(),
     kind: "direct",
   });
+  await f.decide("status", {
+    action: "status",
+    taskId: f.tasks.tasks()[0]!.id,
+  });
   const d = f.store
     .all<Delivery>("notification_deliveries")
-    .find((d) => d.dedupeKey === "reply:status")!;
+    .find((d) => d.dedupeKey === "answer:status")!;
+  assert.match(d.text, /正在处理/);
+  assert.doesNotMatch(d.text, /RUNNING|阶段|最近活动|ID：|秒/);
+  const details = f.tasks.status(f.tasks.tasks()[0]!, true);
   for (const s of [
     "项目",
     "任务",
-    "处理中",
+    "RUNNING",
     "开始",
     "运行",
     "最近活动",
-    "当前步骤",
+    "阶段",
     "开始阶段",
-    "不需要你操作",
-    "还要多久暂时没有可靠依据",
+    "需要操作：否",
+    "预计剩余：无可靠依据",
   ])
-    assert.ok(d.text.includes(s), s);
+    assert.ok(details.includes(s), s);
 });
 test("multi-stage completion waits for scoped approval then resumes same session", async () => {
   const f = await fixture();

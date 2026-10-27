@@ -7,6 +7,23 @@ type Pending = {
   reject: (e: Error) => void;
   timer: NodeJS.Timeout;
 };
+export function appServerArgs(
+  transport: "default" | "chatgpt-http" = "default",
+) {
+  return [
+    "app-server",
+    "--listen",
+    "stdio://",
+    ...(transport === "chatgpt-http"
+      ? [
+          "-c",
+          'model_provider="bridge_http"',
+          "-c",
+          'model_providers.bridge_http={name="ChatGPT HTTP",requires_openai_auth=true,supports_websockets=false}',
+        ]
+      : []),
+  ];
+}
 export class AppServerClient implements CodexController {
   connectionId = "";
   connected = false;
@@ -84,10 +101,10 @@ export class AppServerClient implements CodexController {
       await this.request("initialize", {
         clientInfo: {
           name: "codex_wechat_bridge",
-          title: "Codex WeChat Bridge",
-          version: "0.1.0",
+          title: "鲁滨逊",
+          version: "0.3.0",
         },
-        capabilities: { experimentalApi: false },
+        capabilities: { experimentalApi: true },
       });
       this.write({ method: "initialized" });
       this.connected = true;

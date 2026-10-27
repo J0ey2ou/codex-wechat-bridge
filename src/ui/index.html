@@ -3,21 +3,30 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Codex WeChat Bridge · 本地控制台</title>
+    <title>鲁滨逊 · 你的 AI 工作伙伴</title>
+    <meta name="theme-color" content="#176b53" />
+    <meta
+      name="description"
+      content="鲁滨逊：微信连接、OpenAI 登录、任务与个人记忆。"
+    />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/style.css" />
     <script src="/app.js" defer></script>
   </head>
   <body>
     <aside>
       <div class="brand">
-        <span class="logo">桥</span>
-        <div>Codex WeChat<span>本地任务控制台 · V0.1</span></div>
+        <img class="logo" src="/icon.svg" alt="R" />
+        <div>鲁滨逊<span>AI 工作伙伴 · V0.3</span></div>
       </div>
       <nav>
         <button data-page="home" class="active">概览</button
-        ><button data-page="tasks">任务与审批</button
+        ><button data-page="tasks">任务</button
         ><button data-page="todos">待办与提醒</button
-        ><button data-page="projects">授权项目</button
+        ><button data-page="projects">项目</button
+        ><button data-page="memory">个性与记忆</button
+        ><button data-page="usage">模型与用量</button
         ><button data-page="settings">连接与设置</button>
       </nav>
       <div class="aside-note">
@@ -30,17 +39,57 @@
     <main>
       <header>
         <div>
-          <p class="eyebrow">LOCAL WORKSPACE</p>
+          <p class="eyebrow">ROBINSON · LOCAL WORKSPACE</p>
           <h1 id="page-title">运行概览</h1>
         </div>
         <div>
+          <button
+            id="wechat-push-toggle"
+            class="secondary"
+            role="switch"
+            aria-checked="true"
+          >
+            微信推送：开启
+          </button>
           <span id="refresh-time">正在连接…</span
-          ><button id="refresh" class="secondary">刷新</button>
+          ><button id="install-app" class="secondary" hidden>安装鲁滨逊</button>
+          <button id="refresh" class="secondary">刷新</button>
         </div>
       </header>
       <div id="banner" role="status" hidden></div>
       <section id="home" class="page">
+        <article id="onboarding">
+          <h2>你好，我是鲁滨逊</h2>
+          <p>
+            从连接开始：完成微信扫码绑定，再连接
+            OpenAI，就能在微信聊天、安排项目和管理提醒。
+          </p>
+          <p>
+            我会逐步熟悉你的交流习惯。我是
+            AI，可以形成稳定的风格，但不会成为真人。
+          </p>
+          <button id="setup-open">连接我的账号</button>
+          <p class="hint" id="setup-status"></p>
+        </article>
         <div id="connections" class="metrics"></div>
+        <p class="hint" id="runtime-build"></p>
+        <article>
+          <h2>Codex 页面与其他入口的对话</h2>
+          <p class="hint" id="desktop-activity-status"></p>
+          <button id="desktop-activity-refresh" class="secondary">
+            刷新对话状态
+          </button>
+          <div id="desktop-activity"></div>
+          <p class="hint">这里显示最近 6 条对话，完整列表在“任务”页。</p>
+        </article>
+        <article>
+          <h2>PDF 报告</h2>
+          <p class="hint">
+            默认回复文字；需要文件时可以说“把这次结果整理成 PDF
+            报告发我”。这里保留报告下载，投递状态见微信记录。
+          </p>
+          <div id="pdf-reports"></div>
+        </article>
         <div class="columns">
           <article>
             <h2>正在处理</h2>
@@ -56,6 +105,22 @@
           <div id="home-reminders"></div>
         </article>
         <article>
+          <h2>微信对话</h2>
+          <p class="hint">
+            微信只保留简短回应、必要追问、重要阻塞和结果。完整要求与执行详情在这里查看。
+          </p>
+          <button id="notification-report" class="secondary">
+            查看对话与通知优化报告
+          </button>
+          <button id="project-issues" class="secondary">
+            查看项目问题记录
+          </button>
+          <div id="message-latency"></div>
+          <div id="message-analysis"></div>
+          <h3>项目与对话目标</h3>
+          <div id="routing-requests"></div>
+        </article>
+        <article>
           <h2>最近执行记录</h2>
           <div id="recent-tasks"></div>
         </article>
@@ -66,7 +131,7 @@
           <form id="task-form">
             <div class="form-row">
               <label
-                >授权项目<select
+                >项目<select
                   name="projectId"
                   id="task-project"
                   required
@@ -80,7 +145,7 @@
               /></label>
             </div>
             <label
-              >分阶段执行（可选，每行一个阶段；后续阶段均需审批）<textarea
+              >分阶段执行（可选，每行一个阶段，按顺序完成）<textarea
                 name="stages"
                 rows="3"
                 placeholder="检查代码&#10;运行测试&#10;汇总结果"
@@ -95,6 +160,14 @@
         <article>
           <h2>全部任务</h2>
           <div id="task-list"></div>
+        </article>
+        <article>
+          <h2>Codex 对话观察</h2>
+          <p class="hint">
+            显示从 Codex 页面等入口发起的对话。Bridge
+            未接管这些执行，停止或审批请在原客户端操作。
+          </p>
+          <div id="desktop-task-list"></div>
         </article>
       </section>
       <section id="todos" class="page" hidden>
@@ -130,7 +203,15 @@
       </section>
       <section id="projects" class="page" hidden>
         <article>
-          <h2>添加授权项目</h2>
+          <h2>我的项目</h2>
+          <p class="hint">
+            自动同步 Codex
+            项目名称。完成首次扫码绑定后即可查询软件数据、打开应用和执行项目任务，无需逐个登记或授权。
+          </p>
+          <div id="discovered-workspaces"></div>
+        </article>
+        <article>
+          <h2>添加其他项目（可选）</h2>
           <form id="project-form">
             <div class="form-row">
               <label
@@ -145,11 +226,10 @@
                   placeholder="D:\Projects\population"
               /></label>
             </div>
-            <button>授权此项目</button>
+            <button>添加项目</button>
           </form>
           <p class="hint">
-            仅在本机添加或移除授权。任务默认使用 Codex
-            只读沙箱；文件写入逐次审批。
+            已发现的项目可以直接使用。这里仅用于补充尚未发现的目录；普通项目内读写和执行无需重复审批。
           </p>
         </article>
         <div id="project-list"></div>
@@ -160,6 +240,107 @@
             管理的会话。桌面正在执行的任务不会自动同步到这里。
           </p>
           <div id="session-list"></div>
+        </article>
+      </section>
+      <section id="memory" class="page" hidden>
+        <article>
+          <h2>慢慢熟悉，也始终由你做主</h2>
+          <p>
+            资料按已绑定的微信用户单独保存。明确说“记住……”可保存长期记忆；交流风格只从你直接提出的反馈逐步学习，不猜测敏感信息。
+          </p>
+          <p id="memory-status" class="hint"></p>
+          <form id="memory-settings">
+            <label class="checkbox"
+              ><input
+                type="checkbox"
+                name="enabled"
+              />启用个人记忆与对话上下文</label
+            >
+            <label class="checkbox"
+              ><input
+                type="checkbox"
+                name="learnStyle"
+              />逐步学习交流详略偏好</label
+            >
+            <div class="form-row">
+              <label
+                >交流语气<select name="tone">
+                  <option value="natural">自然</option>
+                  <option value="warm">温暖</option>
+                  <option value="direct">直接</option>
+                </select></label
+              >
+              <label
+                >回答详略<select name="detail">
+                  <option value="adaptive">逐步适应</option>
+                  <option value="brief">简洁</option>
+                  <option value="detailed">详细</option>
+                </select></label
+              >
+            </div>
+            <button>保存偏好</button>
+          </form>
+        </article>
+        <article>
+          <h2>为你记下的事</h2>
+          <form id="memory-form">
+            <label
+              >新增记忆<textarea
+                name="text"
+                required
+                maxlength="800"
+                rows="2"
+                placeholder="例如：我喜欢先看结论，再看解释。"
+              ></textarea></label
+            ><button>记住这件事</button>
+          </form>
+          <div id="memory-list"></div>
+          <div class="actions">
+            <button id="memory-clear" class="danger">清空记忆与风格</button
+            ><button id="history-clear" class="danger">
+              同时清除本地对话记录
+            </button>
+          </div>
+          <p class="hint">
+            编辑、删除或关闭记忆后，从新的问答上下文开始。清除本地记录不删除任务、待办或官方
+            Codex 会话副本；官方副本需在 Codex 内管理。本机 Windows
+            用户可访问本地数据库，请勿共用系统账号存放私人资料。
+          </p>
+        </article>
+      </section>
+      <section id="usage" class="page" hidden>
+        <article>
+          <h2>账号和额度来源</h2>
+          <p>
+            ChatGPT 登录使用符合当前套餐条件的 Codex 权益。API Key 使用 OpenAI
+            Platform API 计费；ChatGPT 登录不会变成 API 余额。
+          </p>
+          <button id="usage-refresh">通过 Bridge 查询官方额度</button>
+          <pre id="usage-result">尚未查询；不推算余额。</pre>
+          <p>
+            <a
+              href="https://chatgpt.com/#settings/Usage"
+              target="_blank"
+              rel="noopener noreferrer"
+              >ChatGPT 用量</a
+            >
+            ·
+            <a
+              href="https://platform.openai.com/usage"
+              target="_blank"
+              rel="noopener noreferrer"
+              >API 用量</a
+            >
+          </p>
+        </article>
+        <article>
+          <h2>逐轮调用证据</h2>
+          <p class="hint">
+            分别展示微信入口和项目执行。会话配置模型不能证明轮次实际模型；未明确返回的字段显示“未报告”。旧版记录无法自动补齐。token
+            数是调用用量，不是可用余额。
+          </p>
+          <button id="evidence-refresh" class="secondary">刷新调用记录</button>
+          <div id="evidence-list"></div>
         </article>
       </section>
       <section id="settings" class="page" hidden>
@@ -184,23 +365,48 @@
               ><button id="qr-confirm" hidden>在本机确认绑定此用户</button>
             </div>
             <p class="hint">
-              扫码后仍需本机确认。绑定后请向助手发送 /help，建立回复上下文。
+              扫码后仍需本机确认。绑定后直接向助手发消息，例如“你好”。
             </p>
           </article>
           <article>
-            <h2>Codex 环境</h2>
-            <p>通过官方 App Server 使用现有 ChatGPT 登录，不需要 API Key。</p>
+            <h2>OpenAI / GPT 登录</h2>
+            <p>
+              在这里发起登录，前往 OpenAI
+              官方页面完成验证，完成后回到鲁滨逊。密码只在官方页面输入。
+            </p>
+            <p id="openai-status">尚未检查登录</p>
+            <div class="actions">
+              <button id="openai-login">使用 ChatGPT 登录</button
+              ><button id="openai-cancel" class="secondary">取消登录</button
+              ><button id="openai-logout" class="danger">退出 OpenAI</button>
+            </div>
+            <p>
+              <a
+                id="openai-link"
+                target="_blank"
+                rel="noopener noreferrer"
+                hidden
+                >打开 OpenAI 官方登录页</a
+              >
+            </p>
             <button id="codex-check">检查连接与登录</button>
             <pre id="codex-result"></pre>
             <p class="hint">
-              尚未登录时，在本机终端执行 codex login。运行中断时保留
-              UNKNOWN，等待核查。
+              使用官方 Codex App Server 管理登录、回调与凭证刷新。沿用现有 Codex
+              登录环境；退出也会影响共用该环境的 Codex CLI。当前只提供 OpenAI
+              登录，不接入其他 AI 服务。
             </p>
           </article>
         </div>
         <article>
           <h2>任务与通知策略</h2>
           <form id="settings-form">
+            <label class="checkbox"
+              ><input name="wechatPushEnabled" type="checkbox" />微信推送</label
+            >
+            <p class="hint">
+              在电脑前可关闭。任务和提醒仍在软件里保留；微信里主动提问仍会回答。重新开启只推送新提醒。关闭窗口后后台仍继续运行。
+            </p>
             <div class="form-grid">
               <label>时区<input name="timezone" required /></label
               ><label
@@ -237,7 +443,7 @@
               ><input
                 name="notifyProgress"
                 type="checkbox"
-              />发送阶段完成通知</label
+              />在软件内记录阶段完成详情（不推送微信）</label
             ><label class="checkbox"
               ><input
                 name="autoContinueLowRisk"
@@ -271,7 +477,7 @@
         </article>
       </section>
       <footer>
-        数据保存在本机 SQLite · 不上传原始项目文件 · 真实通信以实际验收结果为准
+        鲁滨逊 · AI 助手 · 基于 Codex WeChat Bridge · 数据保存在本机
       </footer>
     </main>
     <dialog id="detail">

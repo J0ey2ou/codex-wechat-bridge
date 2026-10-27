@@ -1,150 +1,233 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DateTime } from "luxon";
-import { randomUUID } from "node:crypto";
 import { fixture } from "./helpers.js";
+import type { Question } from "../src/codex/questions.js";
 import type { Approval, Delivery, Task } from "../src/app/types.js";
-import { ConversationManager } from "../src/app/conversation.js";
-import { parseDate } from "../src/scheduler/dates.js";
-test("help uses everyday examples instead of command reference", async () => {
+import { answerAccount } from "../src/codex/account.js";
+
+test("all ordinary messages go to Codex before any business classification", async () => {
   const f = await fixture();
-  await f.router.receive({
-    id: "help",
-    userId: "owner",
-    text: "/help",
-    sentAt: Date.now(),
-    kind: "direct",
-  });
-  const d = f.store
-    .all<Delivery>("notification_deliveries")
-    .find((d) => d.dedupeKey === "reply:help")!;
-  assert.ok(d.text.includes("不用记指令"));
-  assert.equal(d.text.includes("/run"), false);
-});
-test("greetings and thanks never become todos or Codex tasks", async () => {
-  const f = await fixture();
-  const c = new ConversationManager(f.store, f.tasks, f.todos, f.config);
-  for (const t of ["你好", "在吗？", "谢谢", "好的"])
-    await c.reply(t, "owner", randomUUID());
+  for (const text of [
+    "我还有多少token",
+    "明天会下雨吗",
+    "状态机是什么",
+    "帮我分析这句话",
+    "继续解释",
+    "明天下午三点提醒我交报告",
+    "帮我检查项目代码",
+  ]) {
+    await f.router.receive({
+      id: text,
+      text,
+      userId: "owner",
+      sentAt: Date.now(),
+      kind: "direct",
+    });
+    assert.equal(f.store.get<Question>("questions", text)?.text, text);
+  }
+  assert.equal(f.tasks.tasks().length, 0);
   assert.equal(f.todos.list().length, 0);
+  assert.equal(f.store.all("notification_deliveries").length, 0);
+});
+test("model answer and follow-up reuse analysis thread, with actual results in context", async () => {
+  const f = await fixture();
+  f.questions.enqueue("状态机是什么", "owner", "one");
+  const q = await f.decide("one", { reply: "状态机用状态和事件描述变化。" });
+  assert.equal(q.answer, "状态机用状态和事件描述变化。");
+  f.questions.enqueue("举个例子", "owner", "two");
+  const q2 = await f.decide("two", { reply: "红绿灯就是一个例子。" });
+  assert.equal(q.threadId, q2.threadId);
+  assert.ok(f.codex.calls.some((c) => c.method === "thread/resume"));
   assert.equal(f.tasks.tasks().length, 0);
+  assert.equal(f.todos.list().length, 0);
+  const input = JSON.parse(
+    f.codex.calls.filter((c) => c.method === "turn/start").at(-1)!.params
+      .input[0].text,
+  );
+  assert.equal(input.userMessage, "举个例子");
+  assert.equal(input.bridgeContext.recentResults[0].result, q.answer);
 });
-test("Chinese clock words and relative delays parse in timezone", () => {
-  const now = DateTime.fromISO("2026-10-25T10:00:00", {
-    zone: "Asia/Shanghai",
-  }).toMillis();
-  const d = parseDate("明天下午三点半提醒我交报告", "Asia/Shanghai", now);
-  assert.equal(
-    DateTime.fromMillis(d.at!, { zone: "Asia/Shanghai" }).toISO(),
-    "2026-10-26T15:30:00.000+08:00",
-  );
-  assert.equal(
-    parseDate("十分钟后提醒我", "Asia/Shanghai", now).at,
-    now + 600000,
-  );
-  assert.equal(
-    parseDate("半小时后提醒我", "Asia/Shanghai", now).at,
-    now + 1800000,
-  );
-});
-test("reminder clarification remembers tomorrow and accepts afternoon three", async () => {
+test("structured decision cannot select an unauthorized project or replay task creation", async () => {
   const f = await fixture();
-  const c = new ConversationManager(f.store, f.tasks, f.todos, f.config);
-  const first = await c.reply("明天下午提醒我交报告", "owner", "one");
-  assert.ok(first.includes("具体几点"));
-  assert.equal(f.todos.list()[0]?.status, "draft");
-  const next = await c.reply("下午三点", "owner", "two");
-  assert.ok(next.includes("已记好"));
-  const t = f.todos.list()[0]!;
-  assert.equal(t.status, "open");
-  assert.equal(
-    DateTime.fromMillis(t.dueAt!, { zone: "Asia/Shanghai" }).hour,
-    15,
-  );
-});
-test("ambiguous statement asks execution vs todo, preserving original text", async () => {
-  const f = await fixture();
-  const c = new ConversationManager(f.store, f.tasks, f.todos, f.config);
-  const first = await c.reply("完善论文格式", "owner", "one");
-  assert.ok(first.includes("待办"));
+  f.questions.enqueue("帮我改代码", "owner", "bad");
+  const bad = await f.decide("bad", {
+    action: "run",
+    projectId: "invented",
+    text: "修改代码",
+  });
+  assert.equal(bad.status, "failed");
   assert.equal(f.tasks.tasks().length, 0);
-  await c.reply("记下来", "owner", "two");
-  assert.equal(f.todos.list()[0]?.title, "完善论文格式");
-});
-test("project clarification persists and reuses the original request", async () => {
-  const f = await fixture();
-  f.tasks.addProject("另一个", process.cwd() + "\\src");
-  const c = new ConversationManager(f.store, f.tasks, f.todos, f.config);
-  const first = await c.reply("帮我检查代码有没有问题", "owner", "one");
-  assert.ok(first.includes("哪个项目"));
-  await c.reply("另一个", "owner", "two");
-  assert.equal(f.tasks.tasks()[0]?.title, "帮我检查代码有没有问题");
-  assert.equal(f.tasks.project(f.tasks.tasks()[0]!.projectId).name, "另一个");
-});
-test("natural completion selects prior ordered todo list without IDs", async () => {
-  const f = await fixture();
-  const c = new ConversationManager(f.store, f.tasks, f.todos, f.config);
-  f.todos.add("明天 12:00 提交报告", "one");
-  f.todos.add("后天 12:00 检查结果", "two");
-  const list = await c.reply("我还有哪些事没做？", "owner", "three");
-  assert.ok(list.includes("2 件"));
-  const reply = await c.reply("第二件做完了", "owner", "four");
-  assert.ok(reply.includes("已完成"));
-  assert.equal(f.todos.list().filter((t) => t.status === "done").length, 1);
-});
-test("bare agreement cannot approve an operation; explicit scoped natural confirmation works", async () => {
-  const f = await fixture();
-  const t = f.tasks.create(
-    f.project.id,
-    "检查",
-    [1, 2].map((i) => ({
-      title: `阶段${i}`,
-      prompt: `阶段${i}`,
-      requiresApproval: true,
-      lowRisk: false,
-    })),
-  );
-  await f.tasks.pump();
-  const r = f.store.get<Task>("tasks", t.id)!;
+  f.questions.enqueue("帮我改代码", "owner", "good");
+  const q = await f.decide("good", {
+    action: "run",
+    projectId: f.project.id,
+    text: "修改代码，保留原始文件",
+  });
   f.codex.emit("turn/completed", {
-    threadId: r.threadId,
-    turn: { id: r.turnId, status: "completed" },
+    threadId: q.threadId,
+    turn: { id: q.turnId, status: "completed" },
+  });
+  await f.questions.drained();
+  assert.equal(f.tasks.tasks().length, 1);
+  assert.ok(f.tasks.tasks()[0]!.title.includes("保留原始文件"));
+});
+test("model reminder clarification does not fabricate a date or create a premature todo", async () => {
+  const f = await fixture();
+  f.questions.enqueue("明天下午提醒我交报告", "owner", "one");
+  await f.decide("one", {
+    action: "add_todo",
+    text: "交报告",
+    reply: "明天下午具体几点提醒？",
+  });
+  assert.equal(f.todos.list().length, 0);
+  f.questions.enqueue("三点", "owner", "two");
+  await f.decide("two", {
+    action: "add_todo",
+    text: "交报告",
+    date: "2099-10-26 15:00",
+  });
+  assert.equal(f.todos.list().length, 1);
+  assert.equal(f.todos.list()[0]!.status, "open");
+});
+test("invalid model JSON is repaired silently twice before failing without actions", async () => {
+  const f = await fixture();
+  f.questions.enqueue("问个问题", "owner", "one");
+  await f.questions.pump();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const q = f.store.get<Question>("questions", "one")!;
+    f.codex.emit("item/completed", {
+      threadId: q.threadId,
+      turnId: q.turnId,
+      item: { type: "agentMessage", text: "not a decision" },
+    });
+    f.codex.emit("turn/completed", {
+      threadId: q.threadId,
+      turn: { id: q.turnId, status: "completed" },
+    });
+    await f.questions.drained();
+    const current = f.store.get<Question>("questions", "one")!;
+    assert.equal(f.todos.list().length, 0);
+    assert.equal(f.tasks.tasks().length, 0);
+    if (attempt < 2) {
+      assert.equal(current.status, "running");
+      assert.equal(current.repairAttempts, attempt + 1);
+      assert.notEqual(current.turnId, q.turnId);
+      assert.equal(f.store.all("notification_deliveries").length, 0);
+      const input = JSON.parse(
+        f.codex.calls.filter((c) => c.method === "turn/start").at(-1)!.params
+          .input[0].text,
+      );
+      assert.equal(input.computerObservation.kind, "decision_format_repair");
+      assert.equal(input.userMessage, "问个问题");
+    }
+  }
+  assert.equal(f.store.get<Question>("questions", "one")?.status, "failed");
+  assert.equal(f.store.get<Question>("questions", "one")?.repairAttempts, 2);
+  assert.equal(f.store.all<Delivery>("notification_deliveries").length, 1);
+  assert.doesNotMatch(
+    f.store.all<Delivery>("notification_deliveries")[0]!.text,
+    /JSON|schema|not a decision/,
+  );
+});
+test("analysis thread requests cannot approve tools and have only one owner", async () => {
+  const f = await fixture();
+  f.questions.enqueue("问问题", "owner", "one");
+  await f.questions.pump();
+  const q = f.store.get<Question>("questions", "one")!;
+  f.codex.emit(
+    "item/commandExecution/requestApproval",
+    { threadId: q.threadId, turnId: q.turnId, command: "write" },
+    12,
+  );
+  await f.questions.drained();
+  await f.tasks.drained();
+  assert.deepEqual(
+    f.codex.responses.filter((x) => x.id === 12),
+    [{ id: 12, result: { decision: "decline" } }],
+  );
+});
+test("bare agreement interpreted by the model still cannot approve a pending operation", async () => {
+  const f = await fixture();
+  const task = f.tasks.create(f.project.id, "检查", [
+    { title: "一", prompt: "一", requiresApproval: false, lowRisk: false },
+    { title: "二", prompt: "二", requiresApproval: true, lowRisk: false },
+  ]);
+  await f.tasks.pump();
+  const t = f.store.get<Task>("tasks", task.id)!;
+  f.codex.emit("turn/completed", {
+    threadId: t.threadId,
+    turn: { id: t.turnId, status: "completed" },
   });
   await f.tasks.drained();
   const a = f.store.all<Approval>("approvals")[0]!;
-  const c = new ConversationManager(f.store, f.tasks, f.todos, f.config);
-  const ask = await c.reply("好的", "owner", "one");
-  assert.ok(ask.includes("确认继续"));
+  f.questions.enqueue("好的", "owner", "one");
+  const q = await f.decide("one", { action: "approve", approvalId: a.id });
+  assert.ok(q.answer?.includes("软件后台"));
   assert.equal(f.store.get<Approval>("approvals", a.id)?.status, "pending");
-  await c.reply(`确认继续 ${a.id}`, "owner", "two");
+  f.questions.enqueue(`确认继续 ${a.id}`, "owner", "two");
+  await f.decide("two", { action: "approve", approvalId: a.id });
   assert.equal(f.store.get<Approval>("approvals", a.id)?.status, "approved");
-  await assert.rejects(c.reply(`确认继续 ${a.id}`, "owner", "three"));
 });
-test("a new constraint while waiting for a stage is preserved", async () => {
+test("account intent queries real adapter data, never invents exact remaining tokens", async () => {
   const f = await fixture();
-  const t = f.tasks.create(
-    f.project.id,
-    "检查",
-    [1, 2].map((i) => ({
-      title: `阶段${i}`,
-      prompt: `阶段${i}`,
-      requiresApproval: true,
-      lowRisk: false,
-    })),
+  const original = f.codex.request.bind(f.codex);
+  f.codex.request = async (method, params) =>
+    method === "account/rateLimits/read"
+      ? ({
+          rateLimits: {
+            primary: {
+              usedPercent: 25,
+              windowDurationMins: 300,
+              resetsAt: 1900000000,
+            },
+          },
+          ordinaryUsageAllowed: false,
+        } as any)
+      : original(method, params);
+  f.questions.enqueue("我还有多少token", "owner", "one");
+  const q = await f.decide("one", { action: "account" });
+  assert.ok(q.answer?.includes("75%"));
+  assert.ok(q.answer?.includes("5 小时"));
+  assert.ok(q.answer?.includes("不提供"));
+  assert.ok(q.answer?.includes("暂不可用"));
+  assert.equal(f.todos.list().length, 0);
+});
+test("missing account statistics are not shown as zero or unlimited", async () => {
+  const f = await fixture();
+  const reply = await answerAccount(
+    f.codex,
+    "我还有多少token",
+    f.config.timezone,
   );
-  await f.tasks.pump();
-  const r = f.store.get<Task>("tasks", t.id)!;
-  f.codex.emit("turn/completed", {
-    threadId: r.threadId,
-    turn: { id: r.turnId, status: "completed" },
+  assert.ok(reply.includes("没有返回"));
+  assert.equal(reply.includes("0%"), false);
+});
+test("restart never repeats an already claimed decision", async () => {
+  const f = await fixture();
+  f.store.put<Question>("questions", {
+    id: "one",
+    userId: "owner",
+    text: "操作",
+    createdAt: Date.now(),
+    status: "dispatching",
   });
-  await f.tasks.drained();
-  const c = new ConversationManager(f.store, f.tasks, f.todos, f.config);
-  await c.reply("继续当前任务，但不要删除原始文件", "owner", "one");
+  f.questions.recover();
+  await f.questions.pump();
+  assert.equal(f.store.get<Question>("questions", "one")?.status, "failed");
+  assert.equal(f.codex.calls.length, 0);
+});
+test("timeout sends an honest failure; late completion cannot execute a decision", async () => {
+  const f = await fixture();
+  f.questions.enqueue("问问题", "owner", "one");
+  await f.questions.pump();
+  const q = f.store.get<Question>("questions", "one")!;
+  f.questions.monitor(Date.now() + 91000);
+  await f.questions.drained();
+  assert.equal(f.store.get<Question>("questions", "one")?.status, "failed");
   assert.ok(
     f.store
-      .get<Task>("tasks", t.id)
-      ?.stages[1]?.prompt.includes("不要删除原始文件"),
+      .all<Delivery>("notification_deliveries")
+      .some((d) => d.text.includes("超时")),
   );
-  assert.equal(f.store.get<Task>("tasks", t.id)?.status, "QUEUED");
+  assert.equal(f.tasks.tasks().length, 0);
 });

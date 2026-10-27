@@ -25,10 +25,12 @@ if (existsSync(lock)) {
 writeFileSync(lock, String(process.pid), { flag: "wx" });
 const bridge = new Bridge(config);
 const server = createApi(bridge);
+bridge.onShutdown = () => void shutdown();
 let closing = false;
 const stopFile = path.join(config.dataDir, "stop.request");
 const stopWatcher = setInterval(() => {
   if (existsSync(stopFile)) {
+    if (bridge.tasks.tasks().some(t => !["COMPLETED", "FAILED", "INTERRUPTED"].includes(t.status)) || bridge.store.all<{status:string}>("questions").some(q => ["queued","running","dispatching"].includes(q.status))) return;
     unlinkSync(stopFile);
     void shutdown();
   }
@@ -57,7 +59,7 @@ server.on("error", (e) => {
   void shutdown();
 });
 server.listen(config.port, "127.0.0.1", () => {
-  console.log(`Codex WeChat Bridge: http://127.0.0.1:${config.port}`);
+  console.log(`鲁滨逊: http://127.0.0.1:${config.port}`);
   console.log(`模式 Codex=${config.codexMode}, WeChat=${config.wechatMode}`);
   void bridge.start().catch(() => {
     bridge.store.setSetting(
